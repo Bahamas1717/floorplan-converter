@@ -8,6 +8,7 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script async src="https://docs.opencv.org/4.5.2/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <style>
         * {
             margin: 0;
@@ -454,10 +455,23 @@
         .instructions li {
             margin-bottom: 8px;
         }
+
+        #cvCanvas {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
+    <canvas id="cvCanvas"></canvas>
+
+    <script type="text/javascript">
+        let cvReady = false;
+        function onOpenCvReady() {
+            cvReady = true;
+            console.log('OpenCV.js is ready');
+        }
+    </script>
 
     <script type="text/babel">
         const { useState, useRef, useEffect } = React;
@@ -489,6 +503,7 @@
             const [projectType, setProjectType] = useState('residential');
             const [settings, setSettings] = useState(PRESETS.residential);
             const [dragOver, setDragOver] = useState(false);
+            const [cvLoaded, setCvLoaded] = useState(false);
             
             // Scale calibration
             const [calibrationMode, setCalibrationMode] = useState(false);
@@ -504,9 +519,21 @@
             const [detectedElements, setDetectedElements] = useState({ walls: [], doors: [], windows: [] });
             const [selectedElement, setSelectedElement] = useState(null);
             const [tempPoints, setTempPoints] = useState([]);
+            const [detecting, setDetecting] = useState(false);
+            const [detectionProgress, setDetectionProgress] = useState(0);
             
             const canvasRef = useRef(null);
             const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                const checkCv = setInterval(() => {
+                    if (window.cv && window.cv.imread) {
+                        setCvLoaded(true);
+                        clearInterval(checkCv);
+                    }
+                }, 100);
+                return () => clearInterval(checkCv);
+            }, []);
 
             useEffect(() => {
                 if (image && canvasRef.current) {
@@ -523,7 +550,6 @@
                             setImage(img);
                             setImageData(e.target.result);
                             setCurrentStep(2);
-                            // Auto-run OCR to detect dimensions
                             setTimeout(() => runOCR(img), 500);
                         };
                         img.src = e.target.result;
@@ -548,9 +574,8 @@
                     await worker.loadLanguage('eng');
                     await worker.initialize('eng');
                     
-                    const { data: { text, words } } = await worker.recognize(img);
+                    const { data: { text } } = await worker.recognize(img);
                     
-                    // Look for dimension patterns like "5.2m", "3m", "520cm"
                     const dimensions = [];
                     const dimensionRegex = /(\d+\.?\d*)\s*(m|cm|mm|'|")/gi;
                     let match;
@@ -559,11 +584,10 @@
                         let value = parseFloat(match[1]);
                         const unit = match[2].toLowerCase();
                         
-                        // Convert to meters
                         if (unit === 'cm') value /= 100;
                         else if (unit === 'mm') value /= 1000;
-                        else if (unit === "'") value *= 0.3048; // feet
-                        else if (unit === '"') value *= 0.0254; // inches
+                        else if (unit === "'") value *= 0.3048;
+                        else if (unit === '"') value *= 0.0254;
                         
                         dimensions.push({
                             value: value,
@@ -574,7 +598,6 @@
 
                     setDetectedDimensions(dimensions);
                     
-                    // If we found dimensions, suggest using the largest as calibration
                     if (dimensions.length > 0) {
                         const largest = dimensions.reduce((a, b) => a.value > b.value ? a : b);
                         setCalibrationDistance(largest.value.toString());
@@ -612,10 +635,8 @@
                 canvas.width = image.width;
                 canvas.height = image.height;
 
-                // Draw image
                 ctx.drawImage(image, 0, 0);
 
-                // Draw calibration line
                 if (calibrationPoints.length > 0) {
                     ctx.strokeStyle = '#ff0000';
                     ctx.lineWidth = 3;
@@ -626,7 +647,6 @@
                         ctx.lineTo(calibrationPoints[1].x, calibrationPoints[1].y);
                         ctx.stroke();
 
-                        // Draw distance label
                         if (pixelsPerMeter) {
                             const midX = (calibrationPoints[0].x + calibrationPoints[1].x) / 2;
                             const midY = (calibrationPoints[0].y + calibrationPoints[1].y) / 2;
@@ -639,7 +659,6 @@
                         }
                     }
 
-                    // Draw calibration points
                     calibrationPoints.forEach(point => {
                         ctx.fillStyle = '#ff0000';
                         ctx.beginPath();
@@ -651,7 +670,6 @@
                     });
                 }
 
-                // Draw temporary points for current tool
                 if (tempPoints.length > 0 && activeTool) {
                     ctx.fillStyle = activeTool === 'wall' ? '#4caf50' : activeTool === 'door' ? '#2196f3' : '#ff9800';
                     tempPoints.forEach(point => {
@@ -661,7 +679,6 @@
                     });
                 }
 
-                // Draw detected walls
                 ctx.lineWidth = 3;
                 detectedElements.walls.forEach((wall, idx) => {
                     ctx.strokeStyle = selectedElement?.type === 'wall' && selectedElement?.index === idx ? '#ffeb3b' : '#4caf50';
@@ -670,7 +687,6 @@
                     ctx.lineTo(wall.x2, wall.y2);
                     ctx.stroke();
 
-                    // Draw length label
                     if (pixelsPerMeter) {
                         const length = Math.sqrt(Math.pow(wall.x2 - wall.x1, 2) + Math.pow(wall.y2 - wall.y1, 2)) / pixelsPerMeter;
                         const midX = (wall.x1 + wall.x2) / 2;
@@ -684,14 +700,12 @@
                     }
                 });
 
-                // Draw detected doors
                 detectedElements.doors.forEach((door, idx) => {
                     ctx.strokeStyle = selectedElement?.type === 'door' && selectedElement?.index === idx ? '#ffeb3b' : '#2196f3';
                     ctx.fillStyle = 'rgba(33, 150, 243, 0.2)';
                     ctx.fillRect(door.x, door.y, door.width, door.height);
                     ctx.strokeRect(door.x, door.y, door.width, door.height);
                     
-                    // Draw door swing arc
                     if (door.swing) {
                         ctx.beginPath();
                         ctx.arc(door.x, door.y, door.width, 0, Math.PI / 2);
@@ -699,7 +713,6 @@
                     }
                 });
 
-                // Draw detected windows
                 detectedElements.windows.forEach((window, idx) => {
                     ctx.strokeStyle = selectedElement?.type === 'window' && selectedElement?.index === idx ? '#ffeb3b' : '#ff9800';
                     ctx.fillStyle = 'rgba(255, 152, 0, 0.2)';
@@ -784,32 +797,164 @@
                 }
             };
 
-            const runAutoDetection = () => {
-                // Simplified auto-detection for prototype
-                // In production, this would use actual CV algorithms
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext('2d');
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                
-                // Mock detection results based on the uploaded image
-                const mockDetections = {
-                    walls: [
-                        { x1: 200, y1: 150, x2: 600, y2: 150 },
-                        { x1: 600, y1: 150, x2: 600, y2: 450 },
-                        { x1: 200, y1: 150, x2: 200, y2: 450 },
-                        { x1: 200, y1: 450, x2: 600, y2: 450 },
-                    ],
-                    doors: [
-                        { x: 350, y: 145, width: 40, height: 10, swing: true },
-                    ],
-                    windows: [
-                        { x: 250, y: 145, width: 30, height: 10 },
-                        { x: 500, y: 145, width: 30, height: 10 },
-                    ]
-                };
+            const runAutoDetection = async () => {
+                if (!window.cv || !cvLoaded) {
+                    alert('Computer Vision library is still loading. Please wait a moment and try again.');
+                    return;
+                }
 
-                setDetectedElements(mockDetections);
-                setCurrentStep(4);
+                setDetecting(true);
+                setDetectionProgress(0);
+
+                try {
+                    const cv = window.cv;
+                    const canvas = canvasRef.current;
+                    
+                    setDetectionProgress(10);
+                    
+                    // Load image into OpenCV
+                    let src = cv.imread(canvas);
+                    let gray = new cv.Mat();
+                    let edges = new cv.Mat();
+                    let lines = new cv.Mat();
+                    
+                    setDetectionProgress(20);
+                    
+                    // Convert to grayscale
+                    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                    
+                    setDetectionProgress(30);
+                    
+                    // Apply Gaussian blur to reduce noise
+                    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+                    
+                    setDetectionProgress(40);
+                    
+                    // Edge detection
+                    cv.Canny(gray, edges, 50, 150);
+                    
+                    setDetectionProgress(50);
+                    
+                    // Detect lines using Hough Transform
+                    cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 50, 50, 10);
+                    
+                    setDetectionProgress(70);
+                    
+                    // Process detected lines into walls
+                    const detectedWalls = [];
+                    const minLength = 30; // Minimum line length to consider as wall
+                    
+                    for (let i = 0; i < lines.rows; i++) {
+                        const x1 = lines.data32S[i * 4];
+                        const y1 = lines.data32S[i * 4 + 1];
+                        const x2 = lines.data32S[i * 4 + 2];
+                        const y2 = lines.data32S[i * 4 + 3];
+                        
+                        const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+                        
+                        if (length > minLength) {
+                            // Check if this line is mostly horizontal or vertical
+                            const angle = Math.abs(Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI);
+                            const isHorizontalOrVertical = angle < 10 || angle > 170 || (angle > 80 && angle < 100);
+                            
+                            if (isHorizontalOrVertical) {
+                                detectedWalls.push({ x1, y1, x2, y2 });
+                            }
+                        }
+                    }
+                    
+                    setDetectionProgress(80);
+                    
+                    // Merge similar walls (remove duplicates)
+                    const mergedWalls = [];
+                    const mergeThreshold = 15;
+                    
+                    for (let wall of detectedWalls) {
+                        let merged = false;
+                        for (let existing of mergedWalls) {
+                            const dist = Math.sqrt(
+                                Math.pow(wall.x1 - existing.x1, 2) + 
+                                Math.pow(wall.y1 - existing.y1, 2) +
+                                Math.pow(wall.x2 - existing.x2, 2) + 
+                                Math.pow(wall.y2 - existing.y2, 2)
+                            );
+                            
+                            if (dist < mergeThreshold) {
+                                merged = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!merged) {
+                            mergedWalls.push(wall);
+                        }
+                    }
+                    
+                    setDetectionProgress(90);
+                    
+                    // Detect potential doors and windows (gaps in walls or small rectangles)
+                    let contours = new cv.MatVector();
+                    let hierarchy = new cv.Mat();
+                    cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                    
+                    const detectedDoors = [];
+                    const detectedWindows = [];
+                    
+                    for (let i = 0; i < contours.size(); i++) {
+                        const contour = contours.get(i);
+                        const rect = cv.boundingRect(contour);
+                        
+                        // Doors are typically vertical rectangles, windows are smaller
+                        const aspectRatio = rect.height / rect.width;
+                        const area = rect.width * rect.height;
+                        
+                        if (area > 200 && area < 5000) {
+                            if (aspectRatio > 1.5 && aspectRatio < 4) {
+                                // Likely a door
+                                detectedDoors.push({
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height,
+                                    swing: true
+                                });
+                            } else if (aspectRatio > 0.3 && aspectRatio < 2 && area < 2000) {
+                                // Likely a window
+                                detectedWindows.push({
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height
+                                });
+                            }
+                        }
+                    }
+                    
+                    setDetectionProgress(100);
+                    
+                    // Clean up
+                    src.delete();
+                    gray.delete();
+                    edges.delete();
+                    lines.delete();
+                    contours.delete();
+                    hierarchy.delete();
+                    
+                    // Update state with detected elements
+                    setDetectedElements({
+                        walls: mergedWalls.slice(0, 100), // Limit to prevent overwhelming
+                        doors: detectedDoors.slice(0, 20),
+                        windows: detectedWindows.slice(0, 30)
+                    });
+                    
+                    setCurrentStep(4);
+                    setDetecting(false);
+                    
+                } catch (error) {
+                    console.error('Detection Error:', error);
+                    alert('Detection failed. Please try manual mode or adjust the image.');
+                    setDetecting(false);
+                }
             };
 
             const deleteElement = (type, index) => {
@@ -824,7 +969,6 @@
                     return;
                 }
 
-                // Generate comprehensive Ruby script
                 let rubyScript = `# SketchUp Floor Plan Import Script
 # Generated by inkinteriors Floor Plan Converter
 # Project Type: ${projectType}
@@ -849,7 +993,6 @@ window_layer = layers.add('Windows')
 
 `;
 
-                // Add walls
                 rubyScript += `\n# Create ${detectedElements.walls.length} Walls\n`;
                 detectedElements.walls.forEach((wall, idx) => {
                     const x1 = wall.x1 / pixelsPerMeter;
@@ -870,7 +1013,6 @@ face.pushpull(wall_thickness)
 `;
                 });
 
-                // Add doors
                 rubyScript += `\n# Create ${detectedElements.doors.length} Doors\n`;
                 detectedElements.doors.forEach((door, idx) => {
                     const x = door.x / pixelsPerMeter;
@@ -888,7 +1030,6 @@ door_face.layer = door_layer
 `;
                 });
 
-                // Add windows
                 rubyScript += `\n# Create ${detectedElements.windows.length} Windows\n`;
                 detectedElements.windows.forEach((window, idx) => {
                     const x = window.x / pixelsPerMeter;
@@ -908,7 +1049,6 @@ win_face.layer = window_layer
 
                 rubyScript += `\nmodel.commit_operation\nUI.messagebox('Floor plan imported successfully!')\n`;
 
-                // Download the script
                 const blob = new Blob([rubyScript], { type: 'text/plain' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -935,7 +1075,6 @@ win_face.layer = window_layer
                     </div>
 
                     <div className="main-content">
-                        {/* Workflow steps */}
                         <div className="workflow-steps">
                             <div className={`step ${currentStep >= 1 ? 'completed' : ''} ${currentStep === 1 ? 'active' : ''}`}>
                                 <div className="step-number">1</div>
@@ -964,14 +1103,20 @@ win_face.layer = window_layer
                             </div>
                         </div>
 
+                        {!cvLoaded && (
+                            <div className="alert alert-info">
+                                🔄 Loading Computer Vision engine... (this may take a moment)
+                            </div>
+                        )}
+
                         {!image ? (
                             <>
                                 <div className="instructions">
                                     <h3>✨ How This Saves Your Time:</h3>
                                     <ol>
                                         <li><strong>Upload</strong> your JPEG floor plan from client/architect</li>
-                                        <li><strong>Auto-detect</strong> dimensions from labels and scale bars</li>
-                                        <li><strong>AI finds</strong> all walls, doors, and windows automatically</li>
+                                        <li><strong>AI detects</strong> dimensions from labels automatically</li>
+                                        <li><strong>Computer Vision finds</strong> all walls, doors, and windows</li>
                                         <li><strong>Quick edit</strong> any mistakes in 2-5 minutes</li>
                                         <li><strong>Export</strong> ready-to-use SketchUp file - no manual tracing!</li>
                                     </ol>
@@ -986,7 +1131,7 @@ win_face.layer = window_layer
                                 >
                                     <div className="upload-icon">📐</div>
                                     <div className="upload-text">Drop your floor plan here or click to browse</div>
-                                    <div className="upload-subtext">Supports JPEG, PNG - works with dimensioned plans and scale bars</div>
+                                    <div className="upload-subtext">Supports JPEG, PNG - AI-powered detection included!</div>
                                 </div>
                                 <input
                                     ref={fileInputRef}
@@ -998,7 +1143,6 @@ win_face.layer = window_layer
                             </>
                         ) : (
                             <>
-                                {/* Settings Panel */}
                                 <div className="settings-panel">
                                     <h3>⚙️ Project Settings</h3>
                                     <div className="settings-grid">
@@ -1027,7 +1171,6 @@ win_face.layer = window_layer
                                     </div>
                                 </div>
 
-                                {/* OCR Progress */}
                                 {ocrRunning && (
                                     <div className="alert alert-info">
                                         <div>🔍 Scanning for dimensions and scale bars...</div>
@@ -1038,14 +1181,12 @@ win_face.layer = window_layer
                                     </div>
                                 )}
 
-                                {/* Detected dimensions */}
                                 {detectedDimensions.length > 0 && !ocrRunning && (
                                     <div className="alert alert-success">
                                         ✅ Found {detectedDimensions.length} dimension labels: {detectedDimensions.map(d => d.original).join(', ')}
                                     </div>
                                 )}
 
-                                {/* Calibration controls */}
                                 {!pixelsPerMeter ? (
                                     <div className="alert alert-warning">
                                         <div style={{ marginBottom: '15px' }}>
@@ -1096,16 +1237,25 @@ win_face.layer = window_layer
                                             </button>
                                         </div>
 
-                                        {/* Editing toolbar */}
+                                        {detecting && (
+                                            <div className="alert alert-info">
+                                                <div>🤖 AI Detection in progress...</div>
+                                                <div className="progress-bar">
+                                                    <div className="progress-fill" style={{ width: `${detectionProgress}%` }}></div>
+                                                </div>
+                                                <div className="progress-text">{detectionProgress}% complete</div>
+                                            </div>
+                                        )}
+
                                         {currentStep >= 3 && (
                                             <div className="toolbar">
                                                 <div className="toolbar-section">
                                                     <button 
                                                         className="btn btn-primary"
                                                         onClick={runAutoDetection}
-                                                        disabled={totalElements > 0}
+                                                        disabled={totalElements > 0 || detecting || !cvLoaded}
                                                     >
-                                                        🤖 Auto-Detect Elements
+                                                        🤖 Auto-Detect Elements (AI)
                                                     </button>
                                                 </div>
                                                 <div className="toolbar-section">
@@ -1131,7 +1281,6 @@ win_face.layer = window_layer
                                             </div>
                                         )}
 
-                                        {/* Detection summary */}
                                         {totalElements > 0 && (
                                             <div className="detection-summary">
                                                 <div className="summary-card">
@@ -1151,7 +1300,6 @@ win_face.layer = window_layer
                                     </>
                                 )}
 
-                                {/* Canvas */}
                                 <div className="canvas-container">
                                     <div className="canvas-wrapper">
                                         <canvas
@@ -1162,10 +1310,9 @@ win_face.layer = window_layer
                                     </div>
                                 </div>
 
-                                {/* Element list */}
                                 {totalElements > 0 && (
                                     <div style={{ marginBottom: '20px' }}>
-                                        <h3 style={{ marginBottom: '15px' }}>Detected Elements (click to select/delete)</h3>
+                                        <h3 style={{ marginBottom: '15px' }}>Detected Elements</h3>
                                         <div className="element-list">
                                             {detectedElements.walls.map((wall, idx) => {
                                                 const length = pixelsPerMeter ? 
@@ -1199,7 +1346,6 @@ win_face.layer = window_layer
                                     </div>
                                 )}
 
-                                {/* Action buttons */}
                                 <div className="action-buttons">
                                     <button className="btn btn-secondary" onClick={() => {setImage(null); setCurrentStep(1);}}>
                                         ← Upload New Plan
@@ -1225,7 +1371,7 @@ win_face.layer = window_layer
                                             <li>Press Enter - your floor plan will appear in 3D!</li>
                                         </ol>
                                         <p style={{ marginTop: '15px', fontStyle: 'italic' }}>
-                                            ✨ Time saved: Hours of manual tracing → 5-10 minutes of verification!
+                                            ✨ Time saved: Hours of manual tracing → 5-10 minutes with AI!
                                         </p>
                                     </div>
                                 )}
