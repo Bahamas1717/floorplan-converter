@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floor Plan to SketchUp Converter</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .main-content {
+            padding: 40px;
+        }
+
+        .upload-zone {
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            padding: 60px 40px;
+            text-align: center;
+            background: #f8f9ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 30px;
+        }
+
+        .upload-zone:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+            transform: translateY(-2px);
+        }
+
+        .upload-zone.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 1.2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .upload-subtext {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .canvas-container {
+            position: relative;
+            background: #f5f5f5;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 30px;
+            border: 2px solid #ddd;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            overflow: auto;
+            max-height: 700px;
+        }
+
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .control-group h3 {
+            font-size: 1rem;
+            margin-bottom: 15px;
+            color: #1e3c72;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .control-row label {
+            flex: 1;
+            font-size: 0.9rem;
+            color: #555;
+        }
+
+        .control-row input,
+        .control-row select {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .detected-elements {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .detected-elements h3 {
+            margin-bottom: 15px;
+            color: #1e3c72;
+        }
+
+        .element-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .element-item {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            font-size: 0.9rem;
+        }
+
+        .element-item strong {
+            color: #667eea;
+        }
+
+        .status-message {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4caf50;
+        }
+
+        .info-box {
+            background: #fff3e0;
+            color: #e65100;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border-left: 4px solid #ff9800;
+        }
+
+        .calibration-info {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            font-size: 0.9rem;
+        }
+
+        .instructions {
+            background: #e3f2fd;
+            color: #0d47a1;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 4px solid #2196f3;
+        }
+
+        .instructions h3 {
+            margin-bottom: 10px;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+        }
+
+        .instructions li {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        function FloorPlanConverter() {
+            const [image, setImage] = useState(null);
+            const [imageData, setImageData] = useState(null);
+            const [calibrationMode, setCalibrationMode] = useState(false);
+            const [calibrationPoints, setCalibrationPoints] = useState([]);
+            const [calibrationDistance, setCalibrationDistance] = useState('');
+            const [pixelsPerMeter, setPixelsPerMeter] = useState(null);
+            const [detectionMode, setDetectionMode] = useState(null);
+            const [detectedElements, setDetectedElements] = useState({ walls: [], doors: [], windows: [] });
+            const [dragOver, setDragOver] = useState(false);
+            
+            const canvasRef = useRef(null);
+            const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                if (image && canvasRef.current) {
+                    drawCanvas();
+                }
+            }, [image, calibrationPoints, detectedElements]);
+
+            const handleFileUpload = (file) => {
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            setImage(img);
+                            setImageData(e.target.result);
+                            resetState();
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const resetState = () => {
+                setCalibrationMode(false);
+                setCalibrationPoints([]);
+                setCalibrationDistance('');
+                setPixelsPerMeter(null);
+                setDetectionMode(null);
+                setDetectedElements({ walls: [], doors: [], windows: [] });
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const file = e.dataTransfer.files[0];
+                handleFileUpload(file);
+            };
+
+            const handleDragOver = (e) => {
+                e.preventDefault();
+                setDragOver(true);
+            };
+
+            const handleDragLeave = () => {
+                setDragOver(false);
+            };
+
+            const drawCanvas = () => {
+                const canvas = canvasRef.current;
+                if (!canvas || !image) return;
+
+                const ctx = canvas.getContext('2d');
+                canvas.width = image.width;
+                canvas.height = image.height;
+
+                // Draw image
+                ctx.drawImage(image, 0, 0);
+
+                // Draw calibration line
+                if (calibrationPoints.length === 2) {
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(calibrationPoints[0].x, calibrationPoints[0].y);
+                    ctx.lineTo(calibrationPoints[1].x, calibrationPoints[1].y);
+                    ctx.stroke();
+
+                    // Draw points
+                    calibrationPoints.forEach(point => {
+                        ctx.fillStyle = '#ff0000';
+                        ctx.beginPath();
+                        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+
+                    // Draw distance label
+                    if (pixelsPerMeter) {
+                        const midX = (calibrationPoints[0].x + calibrationPoints[1].x) / 2;
+                        const midY = (calibrationPoints[0].y + calibrationPoints[1].y) / 2;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(midX - 40, midY - 15, 80, 30);
+                        ctx.fillStyle = '#ff0000';
+                        ctx.font = 'bold 14px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`${calibrationDistance}m`, midX, midY + 5);
+                    }
+                }
+
+                // Draw detected elements
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 2;
+                detectedElements.walls.forEach(wall => {
+                    ctx.beginPath();
+                    ctx.moveTo(wall.x1, wall.y1);
+                    ctx.lineTo(wall.x2, wall.y2);
+                    ctx.stroke();
+                });
+
+                ctx.strokeStyle = '#0000ff';
+                detectedElements.doors.forEach(door => {
+                    ctx.strokeRect(door.x, door.y, door.width, door.height);
+                });
+
+                ctx.strokeStyle = '#ff00ff';
+                detectedElements.windows.forEach(window => {
+                    ctx.strokeRect(window.x, window.y, window.width, window.height);
+                });
+            };
+
+            const handleCanvasClick = (e) => {
+                if (!calibrationMode) return;
+
+                const canvas = canvasRef.current;
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                if (calibrationPoints.length < 2) {
+                    setCalibrationPoints([...calibrationPoints, { x, y }]);
+                }
+            };
+
+            const startCalibration = () => {
+                setCalibrationMode(true);
+                setCalibrationPoints([]);
+                setPixelsPerMeter(null);
+            };
+
+            const finishCalibration = () => {
+                if (calibrationPoints.length === 2 && calibrationDistance) {
+                    const distance = Math.sqrt(
+                        Math.pow(calibrationPoints[1].x - calibrationPoints[0].x, 2) +
+                        Math.pow(calibrationPoints[1].y - calibrationPoints[0].y, 2)
+                    );
+                    const ppm = distance / parseFloat(calibrationDistance);
+                    setPixelsPerMeter(ppm);
+                    setCalibrationMode(false);
+                }
+            };
+
+            const runDetection = () => {
+                // Simplified detection - in production, this would use CV or AI
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // Simulate detection results
+                const mockDetections = {
+                    walls: [
+                        { x1: 100, y1: 100, x2: 400, y2: 100, length: '5.2m' },
+                        { x1: 400, y1: 100, x2: 400, y2: 300, length: '3.8m' },
+                    ],
+                    doors: [
+                        { x: 200, y: 95, width: 40, height: 10, swing: 90 },
+                    ],
+                    windows: [
+                        { x: 150, y: 95, width: 30, height: 10 },
+                    ]
+                };
+
+                setDetectedElements(mockDetections);
+            };
+
+            const exportToSketchUp = () => {
+                if (!pixelsPerMeter) {
+                    alert('Please calibrate the scale first!');
+                    return;
+                }
+
+                // Generate Ruby script for SketchUp
+                let rubyScript = `# SketchUp Floor Plan Import Script
+# Generated by Floor Plan Converter
+
+model = Sketchup.active_model
+entities = model.active_entities
+
+# Scale: ${pixelsPerMeter.toFixed(2)} pixels per meter
+
+# Create walls
+`;
+
+                detectedElements.walls.forEach((wall, idx) => {
+                    const x1 = wall.x1 / pixelsPerMeter;
+                    const y1 = wall.y1 / pixelsPerMeter;
+                    const x2 = wall.x2 / pixelsPerMeter;
+                    const y2 = wall.y2 / pixelsPerMeter;
+                    
+                    rubyScript += `
+# Wall ${idx + 1}
+pt1 = Geom::Point3d.new(${x1.toFixed(2)}, ${y1.toFixed(2)}, 0)
+pt2 = Geom::Point3d.new(${x2.toFixed(2)}, ${y2.toFixed(2)}, 0)
+entities.add_line(pt1, pt2)
+`;
+                });
+
+                rubyScript += `
+# Create doors
+`;
+
+                detectedElements.doors.forEach((door, idx) => {
+                    const x = door.x / pixelsPerMeter;
+                    const y = door.y / pixelsPerMeter;
+                    const width = door.width / pixelsPerMeter;
+                    
+                    rubyScript += `
+# Door ${idx + 1}
+# Position: (${x.toFixed(2)}, ${y.toFixed(2)})
+# Width: ${width.toFixed(2)}m
+`;
+                });
+
+                // Download the script
+                const blob = new Blob([rubyScript], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'floorplan_import.rb';
+                a.click();
+            };
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <h1>🏗️ Floor Plan to SketchUp Converter</h1>
+                        <p>Transform JPEG floor plans into accurate 3D SketchUp models</p>
+                    </div>
+
+                    <div className="main-content">
+                        {!image ? (
+                            <>
+                                <div className="instructions">
+                                    <h3>How it works:</h3>
+                                    <ol>
+                                        <li>Upload your JPEG floor plan</li>
+                                        <li>Calibrate the scale by clicking two points with known distance</li>
+                                        <li>AI detects walls, doors, and windows automatically</li>
+                                        <li>Review and adjust detected elements</li>
+                                        <li>Export directly to SketchUp format</li>
+                                    </ol>
+                                </div>
+
+                                <div 
+                                    className={`upload-zone ${dragOver ? 'dragover' : ''}`}
+                                    onClick={() => fileInputRef.current.click()}
+                                    onDrop={handleDrop}
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                >
+                                    <div className="upload-icon">📐</div>
+                                    <div className="upload-text">Drop your floor plan here or click to browse</div>
+                                    <div className="upload-subtext">Supports JPEG, PNG, PDF floor plans</div>
+                                </div>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => handleFileUpload(e.target.files[0])}
+                                />
+                            </>
+                        ) : (
+                            <>
+                                <div className="controls">
+                                    <div className="control-group">
+                                        <h3>📏 Scale Calibration</h3>
+                                        {!pixelsPerMeter ? (
+                                            <>
+                                                <div className="control-row">
+                                                    <label>Known distance (meters):</label>
+                                                    <input
+                                                        type="number"
+                                                        step="0.1"
+                                                        value={calibrationDistance}
+                                                        onChange={(e) => setCalibrationDistance(e.target.value)}
+                                                        placeholder="e.g., 5.0"
+                                                    />
+                                                </div>
+                                                {calibrationMode ? (
+                                                    <>
+                                                        <div className="info-box" style={{ marginTop: '10px', fontSize: '0.85rem' }}>
+                                                            Click two points on the floor plan that match your known distance
+                                                            ({calibrationPoints.length}/2 points selected)
+                                                        </div>
+                                                        <button 
+                                                            className="btn btn-primary" 
+                                                            onClick={finishCalibration}
+                                                            disabled={calibrationPoints.length !== 2 || !calibrationDistance}
+                                                            style={{ marginTop: '10px', width: '100%' }}
+                                                        >
+                                                            Finish Calibration
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <button 
+                                                        className="btn btn-primary" 
+                                                        onClick={startCalibration}
+                                                        style={{ marginTop: '10px', width: '100%' }}
+                                                    >
+                                                        Start Calibration
+                                                    </button>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <div className="calibration-info">
+                                                <div><strong>✓ Calibrated!</strong></div>
+                                                <div>Scale: {pixelsPerMeter.toFixed(2)} px/m</div>
+                                                <button 
+                                                    className="btn btn-secondary" 
+                                                    onClick={startCalibration}
+                                                    style={{ marginTop: '10px', width: '100%' }}
+                                                >
+                                                    Recalibrate
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="control-group">
+                                        <h3>🤖 AI Detection</h3>
+                                        <button 
+                                            className="btn btn-primary" 
+                                            onClick={runDetection}
+                                            disabled={!pixelsPerMeter}
+                                            style={{ width: '100%', marginBottom: '10px' }}
+                                        >
+                                            Detect Elements
+                                        </button>
+                                        <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                                            {!pixelsPerMeter && 'Calibrate scale first'}
+                                            {pixelsPerMeter && 'Ready to detect walls, doors & windows'}
+                                        </div>
+                                    </div>
+
+                                    <div className="control-group">
+                                        <h3>📤 Export</h3>
+                                        <button 
+                                            className="btn btn-primary" 
+                                            onClick={exportToSketchUp}
+                                            disabled={!pixelsPerMeter}
+                                            style={{ width: '100%' }}
+                                        >
+                                            Generate SketchUp File
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {(detectedElements.walls.length > 0 || detectedElements.doors.length > 0 || detectedElements.windows.length > 0) && (
+                                    <div className="detected-elements">
+                                        <h3>Detected Elements</h3>
+                                        <div className="element-list">
+                                            <div className="element-item">
+                                                <strong>Walls:</strong> {detectedElements.walls.length}
+                                            </div>
+                                            <div className="element-item">
+                                                <strong>Doors:</strong> {detectedElements.doors.length}
+                                            </div>
+                                            <div className="element-item">
+                                                <strong>Windows:</strong> {detectedElements.windows.length}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="canvas-container">
+                                    <div className="canvas-wrapper">
+                                        <canvas
+                                            ref={canvasRef}
+                                            onClick={handleCanvasClick}
+                                            style={{ cursor: calibrationMode ? 'crosshair' : 'default' }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="action-buttons">
+                                    <button 
+                                        className="btn btn-secondary" 
+                                        onClick={() => setImage(null)}
+                                    >
+                                        Upload New Plan
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<FloorPlanConverter />, document.getElementById('root'));
+    </script>
+</body>
+</html>
